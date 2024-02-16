@@ -1,0 +1,89 @@
+defaults:
+  - _self_
+  - override hydra/launcher: submitit_local
+
+############## Directory Info
+libero_path: /fs/cml-projects/taco_rl/LIBERO
+data_storage_dir: /fs/cml-projects/taco_rl/offline_data_libero
+task_data_dir_suffix: _framestack1
+results_dir: ./
+downstream_task_name: none
+downstream_task_suite: libero_10 
+log_root_dir: exp_local   ### Experimental results will be stored at ${log_root_dir}/${exp_name}
+
+############## replay buffer
+replay_buffer_size: 100000000
+replay_buffer_num_workers: 1
+nstep: 3 ### number of future observations to load (to train action quantization & finetune action decoder)
+nstep_history: 10 ### number of historical steps for transformer embedding
+batch_size: 128
+max_traj_per_task: 50 ### number of demonstration trajectories per task
+port: 12230
+
+############## | Stage 1: pretrain action quantization | Stage 2: BPE to learn vocabulary | Stage 3: Downstream Adaptation
+stage: 1 
+num_train_steps: 100100
+
+############## Stage 2 BPE parameters
+vocab_size: null
+min_frequency: 5
+max_token_length: 20
+
+############## Stage 3 parameters
+load_snapshot: true
+eval: true
+num_eval_episodes: 20
+eval_max_steps: 600 ### maximum timesteps per episode 
+eval_freq: 2000
+exp_bc_name: default ### results will be saved at ${log_root_dir}/${exp_name}/stage3/${task_name}/${exp_bc_name}
+finetune_decoder: true ### whether to finetune decoder for downstream tasks (set to be false only for multitask learning)
+multitask: false ### learning libero-90 policy
+
+
+# misc
+seed: 1
+device: cuda
+save_snapshot: true
+
+
+# agent
+lr: 1e-4
+n_code: 10 ### number of action codes
+alpha: 1 ### coefficient for downstream adaptation
+feature_dim: 64
+hidden_dim: 1024
+exp_name: default
+target: prise.PRISEAgent
+action_dim: 7
+img_res: [128, 128]
+decoder_type: gmm
+decoder_loss_coef: 0.01
+
+agent:
+  _target_: ${target}
+  obs_shape: ??? # to be specified later
+  action_dim: ??? # to be specified later
+  device: ${device}
+  lr: ${lr}
+  hidden_dim: ${hidden_dim}
+  feature_dim: ${feature_dim}
+  n_code: ${n_code}
+  alpha: ${alpha}
+  decoder_type: ${decoder_type}
+  decoder_loss_coef: ${decoder_loss_coef}
+
+
+hydra:
+  run:
+    dir: ./${log_root_dir}/${exp_name}
+  sweep:
+    dir: ./exp/${now:%Y.%m.%d}/${now:%H%M}_${agent_cfg.experiment}
+    subdir: ${hydra.job.num}
+  launcher:
+    timeout_min: 4300
+    cpus_per_task: 10
+    gpus_per_node: 1
+    tasks_per_node: 1
+    mem_gb: 160
+    nodes: 1
+    submitit_folder: ./exp/${now:%Y.%m.%d}/${now:%H%M%S}_${agent_cfg.experiment}/.slurm

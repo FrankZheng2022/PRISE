@@ -3,14 +3,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import utils
 import torchvision.transforms as T
-from quantizer import VectorQuantizer
+from utils.quantizer import VectorQuantizer
 import time
 from torch.nn.parallel import DistributedDataParallel as DDP
-from resnet18_encoder import ResnetEncoder
-from policy_head import GMMHead
-from data_augmentation import BatchWiseImgColorJitterAug, TranslationAug, DataAugGroup
+from utils.resnet18_encoder import ResnetEncoder
+from utils.policy_head import GMMHead
+from utils.data_augmentation import BatchWiseImgColorJitterAug, TranslationAug, DataAugGroup
+import utils.misc as utils
 from tqdm import tqdm
 
 class SinusoidalPositionEncoding(nn.Module):

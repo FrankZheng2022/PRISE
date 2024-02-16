@@ -13,9 +13,9 @@ import numpy as np
 import time
 import torch
 import torch.nn as nn
-import libero_wrapper
+import utils.libero_wrapper as libero_wrapper
+from utils.logger import Logger
 from libero.libero import benchmark
-from logger import Logger
 from replay_buffer import make_replay_loader_dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -24,7 +24,7 @@ from torch.distributed import init_process_group, destroy_process_group, gather
 from tokenizer_api import Tokenizer
 from pathlib import Path
 import pickle
-import utils
+import utils.misc as utils
 
 torch.backends.cudnn.benchmark = True
 

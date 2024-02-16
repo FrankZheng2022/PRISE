@@ -2,14 +2,13 @@ import datetime
 import io
 import random
 import traceback
-import utils
 from collections import defaultdict
-
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import IterableDataset
 from torch.utils.data.distributed import DistributedSampler
+import utils.misc as utils
 
 
 def episode_len(episode):

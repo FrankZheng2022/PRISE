@@ -53,7 +53,7 @@ alpha: 1 ### coefficient for downstream adaptation
 feature_dim: 64
 hidden_dim: 1024
 exp_name: default
-target: prise.PRISEAgent
+target: prise_agent.PRISEAgent
 action_dim: 7
 img_res: [128, 128]
 decoder_type: gmm

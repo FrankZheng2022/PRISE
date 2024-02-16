@@ -1,0 +1,22 @@
+cffi
+lockfile
+patchelf
+glfw
+cython==0.29.36
+termcolor==1.1.0
+tb-nightly
+imageio==2.9.0
+imageio-ffmpeg==0.4.4
+hydra-core==1.3.2
+hydra-submitit-launcher==1.1.5
+pandas==1.3.0
+ipdb==0.13.9
+yapf==0.31.0
+mujoco_py==2.1.2.14 # 210
+sklearn==0.0
+matplotlib==3.4.2
+opencv-python==4.5.3.56
+scikit-image
+dm_control
+chardet
+tokenizers==0.15.0

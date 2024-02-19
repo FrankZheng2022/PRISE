@@ -40,10 +40,11 @@ python benchmark_scripts/download_libero_datasets.py --datasets libero_100
 ```
 Next, we need to convert the format of the LIBERO dataset. Copy the ``utils/convert_data.py`` file into the LIBERO repo, and then run
 ```
-python convert_data.py --save_path DATASET_PATH --libero_path ${LIBERO_PATH}/LIBERO/libero/datasets/libero_90
-python convert_data.py --save_path DATASET_PATH --libero_path ${LIBERO_PATH}/LIBERO/libero/datasets/libero_10
+python convert_data.py --save_path ${DATASET_PATH} --libero_path ${LIBERO_PATH}/LIBERO/libero/datasets/libero_90
+python convert_data.py --save_path ${DATASET_PATH} --libero_path ${LIBERO_PATH}/LIBERO/libero/datasets/libero_10
 ```
 Here ${DATASET_PATH} is the path of the libero dataset that you are going to store.
+After you converting the data, rewrite ``libero_path`` in ``cfgs/prise_config.yaml`` to ${LIBERO_PATH}, and ``data_storage_dir`` to ${DATASET_PATH}.
 
 
 

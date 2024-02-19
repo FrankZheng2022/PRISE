@@ -224,7 +224,7 @@ class Workspace:
         self.performance.append(success/self.cfg.num_eval_episodes*100)
         ### Store the evaluated success rate into the pickle file
         if self.rank == 0:
-            with open(self.eval_dir / '{}.pkl'.format(self.cfg.exp_bc_name), 'wb') as f:
+            with open(self.eval_dir / '{}.pkl'.format(self.cfg.downstream_exp_name), 'wb') as f:
                 pickle.dump(self.performance, f)
         self.agent.train(True)
     
@@ -293,7 +293,7 @@ class Workspace:
         ### Save pretrained tokenizer
         vocab_dir = self.results_dir / 'vocab'
         vocab_dir.mkdir(parents=True, exist_ok=True)
-        with open(vocab_dir / 'vocab_mt45_code{}_vocab{}_minfreq{}_maxtoken{}.pkl'.format(self.cfg.n_code, self.cfg.vocab_size, self.cfg.min_frequency, self.cfg.max_token_length), 'wb') as f:
+        with open(vocab_dir / 'vocab_libero90_code{}_vocab{}_minfreq{}_maxtoken{}.pkl'.format(self.cfg.n_code, self.cfg.vocab_size, self.cfg.min_frequency, self.cfg.max_token_length), 'wb') as f:
             pickle.dump([tokenizer, corpus], f)
     
     
@@ -306,7 +306,7 @@ class Workspace:
         
         ################## Load the BPE-Learned vocabulary #################
         vocab_dir = self.results_dir / 'vocab'
-        with open(vocab_dir / 'vocab_mt45_code{}_vocab{}_minfreq{}_maxtoken{}.pkl'.format(self.cfg.n_code, self.cfg.vocab_size, self.cfg.min_frequency, self.cfg.max_token_length), 'rb') as f:
+        with open(vocab_dir / 'vocab_libero90_code{}_vocab{}_minfreq{}_maxtoken{}.pkl'.format(self.cfg.n_code, self.cfg.vocab_size, self.cfg.min_frequency, self.cfg.max_token_length), 'rb') as f:
             loaded_data = pickle.load(f)
             self.tokenizer, corpus = loaded_data
             self.agent.tokenizer = self.tokenizer

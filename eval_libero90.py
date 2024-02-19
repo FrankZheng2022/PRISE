@@ -195,7 +195,7 @@ def main(cfg):
     workspace = W(cfg, RANK, WORLD_SIZE)
     root_dir = Path.cwd()
     workspace.load_snapshot()
-    workspace.evaluate_mt()
+    workspace.evaluate_libero90()
     destroy_process_group()
 
 def wrapper(rank, world_size, cfg):

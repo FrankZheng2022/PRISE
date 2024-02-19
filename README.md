@@ -7,10 +7,10 @@ In this work, we propose a novel view that treats inducing temporal action abstr
 
 We introduce an approach called Primitive Sequence Encoding (**PRISE**) that combines continuous action quantization with BPE to learn powerful action abstractions. We empirically show that high-level skills discovered by **PRISE** from a multitask set of robotic manipulation demonstrations significantly boost the performance of both multitask imitation learning as well as few-shot imitation learning on unseen tasks. 
 
-This thread contains implementation of PRISE on LIBERO. Check out the MetaWorld to see PRISE implementation on MetaWorld.
+This thread contains implementation of **PRISE** on **LIBERO**. Check out the **MetaWorld** thread to see PRISE implementation on **MetaWorld** with slight modification compared to **LIBERO**.
 
 <p align="center">
-  <br><img src='images/title.gif' width="500"/><br>
+  <br><img src='images/PRISE.gif' width="500"/><br>
 </p>
 
 # 🛠️ Installation Instructions

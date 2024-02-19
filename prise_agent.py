@@ -13,6 +13,7 @@ from utils.data_augmentation import BatchWiseImgColorJitterAug, TranslationAug, 
 import utils.misc as utils
 from tqdm import tqdm
 
+### Positional Embedding for PRISE's transformer modules.
 class SinusoidalPositionEncoding(nn.Module):
     def __init__(self, input_size, inv_freq_factor=10, factor_ratio=None):
         super().__init__()

@@ -3,8 +3,8 @@ defaults:
   - override hydra/launcher: submitit_local
 
 ############## Directory Info
-libero_path: /fs/cml-projects/taco_rl/LIBERO
-data_storage_dir: /fs/cml-projects/taco_rl/offline_data_libero
+libero_path: null
+data_storage_dir: null
 task_data_dir_suffix: _framestack1
 results_dir: ./
 downstream_task_name: none
@@ -40,13 +40,13 @@ finetune_decoder: true ### whether to finetune decoder for downstream tasks (set
 multitask: false ### learning libero-90 policy
 
 
-# misc
+############## misc
 seed: 1
 device: cuda
 save_snapshot: true
 
 
-# agent
+############## agent
 lr: 1e-4
 n_code: 10 ### number of action codes
 alpha: 1 ### coefficient for downstream adaptation

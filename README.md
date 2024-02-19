@@ -10,7 +10,7 @@ We introduce an approach called Primitive Sequence Encoding (**PRISE**) that com
 This thread contains implementation of **PRISE** on **LIBERO**. Check out the **MetaWorld** thread to see PRISE implementation on **MetaWorld** with slight modification compared to **LIBERO**.
 
 <p align="center">
-  <br><img src='images/prise_demo.gif' width="500"/><br>
+  <br> <video loop src="images/prise_demo.mp4">  video </video> <br>
 </p>
 
 # 🛠️ Installation Instructions

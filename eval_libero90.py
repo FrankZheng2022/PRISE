@@ -21,7 +21,6 @@ import utils.libero_wrapper as libero_wrapper
 from utils.logger import Logger
 from replay_buffer import make_replay_loader_dist
 import torch.multiprocessing as mp
-from torch.nn.parallel import DistributedDataParallel as DDP
 from collections import defaultdict, deque
 from tokenizer_api import Tokenizer
 
@@ -84,7 +83,7 @@ class Workspace:
         state     = obs.state 
         task_embedding = env.task_embedding
         
-        ### Encode the current timesteo
+        ### Encode the current timestep
         task_embedding = torch.torch.as_tensor(task_embedding, device=self.device)
         obs_agent = torch.torch.as_tensor(obs_agent.copy(), device=self.device).unsqueeze(0)
         obs_wrist = torch.torch.as_tensor(obs_wrist.copy(), device=self.device).unsqueeze(0)
@@ -156,7 +155,7 @@ class Workspace:
 
             print(f'Task:{task_name} Evaluation Time:{time.time()-eval_start_time}s Success Rate:{success/self.cfg.num_eval_episodes*100}%', flush=True)
             
-            ### Save the success rate
+            ### Save the evaluated success rate
             try:
                 with open(self.eval_dir / '{}.pkl'.format(self.cfg.downstream_exp_name), 'rb') as f:
                     performance = pickle.load(f)

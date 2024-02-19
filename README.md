@@ -38,7 +38,7 @@ First, download the LIBERO dataset.
 cd LIBERO
 python benchmark_scripts/download_libero_datasets.py --datasets libero_100
 ```
-Next, we need to convert the format of the LIBERO dataset. Copy the ``utils/convert_data.py`` file into the LIBERO repo, and then run
+Next, we need to convert the format of the LIBERO dataset. Copy the ``convert_data.py`` file into the LIBERO repo, and then run
 ```
 python convert_data.py --save_path ${DATASET_PATH} --libero_path ${LIBERO_PATH}/LIBERO/libero/datasets/libero_90
 python convert_data.py --save_path ${DATASET_PATH} --libero_path ${LIBERO_PATH}/LIBERO/libero/datasets/libero_10

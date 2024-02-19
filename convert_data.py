@@ -1,3 +1,4 @@
+### Convert the original h5py file into the format of PRISE's dataloader.
 import h5py
 import numpy as np
 from pathlib import Path
@@ -40,10 +41,6 @@ def get_task_embedding(task_name):
     sentence_embedding = last_hidden_states[:, 0, :]
     return sentence_embedding
 
-
-
-
-
 def extract_task_information(file_name, libero_path):
     """
     Extracts task information from the given file name.
@@ -62,15 +59,18 @@ def convert_hdf5_file_to_npz(task_name, task_embedding, demo_data,save_path, fra
     num_demos = len(demo_data)
     
     for i in range(num_demos):
+        ### Get agent's view camera
         obs = np.array(demo_data['demo_{}'.format(i)]['obs']['agentview_rgb'])
         obs = convert_frame_stack(obs.transpose(0,3,1,2), frame_stack)
         
+        ### Get wrist's view camera
         obs_wrist = np.array(demo_data['demo_{}'.format(i)]['obs']['eye_in_hand_rgb'])
         obs_wrist = convert_frame_stack(obs_wrist.transpose(0,3,1,2), frame_stack)
         
+        ### Get task embedding
         task_embedding_vector = np.array(task_embedding).reshape(-1)
         
-        ### get actions
+        ### Get actions
         action = np.array(demo_data['demo_{}'.format(i)]['actions'])
         action = np.vstack([np.zeros_like(action[:1]), action[:-1]])
         
@@ -81,15 +81,11 @@ def convert_hdf5_file_to_npz(task_name, task_embedding, demo_data,save_path, fra
             state.append(np.array(demo_data['demo_{}'.format(i)]['obs'][prop_info]))
         state = np.hstack(state)
         
-        reward = np.array(demo_data['demo_{}'.format(i)]['rewards'])
-        reward = np.hstack([np.zeros_like(reward[:1]), reward[:-1]])
-        
         episode = {'observation':obs,
                    'observation_wrist':obs_wrist,
                    'state': state,
                    'task_embedding': task_embedding_vector,
                    'action':action, 
-                   'reward':reward, 
                   }
         fn = save_path / f'{task_name.replace("_", "")}_{i}_{obs.shape[0]}.npz'
         save_episode(episode, fn)

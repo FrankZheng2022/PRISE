@@ -2,13 +2,14 @@ import datetime
 import io
 import random
 import traceback
+import utils.misc as utils
 from collections import defaultdict
+
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import IterableDataset
 from torch.utils.data.distributed import DistributedSampler
-import utils.misc as utils
 
 
 def episode_len(episode):
@@ -33,10 +34,7 @@ def load_episode(fn):
 
 class ReplayBuffer(IterableDataset):
     def __init__(self, replay_dir, max_traj_per_task, max_size, num_workers, nstep,
-                 nstep_history, fetch_every, save_snapshot,
-                 rank=None, world_size=None,
-                 n_code=None, vocab_size=None,
-                 min_frequency=None, max_token_length=None):
+                 nstep_history, fetch_every,rank=None, world_size=None):
         self._replay_dir = replay_dir if type(replay_dir) == list else [replay_dir]
         self._max_traj_per_task = max_traj_per_task
         self._size = 0
@@ -48,13 +46,8 @@ class ReplayBuffer(IterableDataset):
         self._nstep_history = nstep_history
         self._fetch_every = fetch_every
         self._samples_since_last_fetch = fetch_every
-        self._save_snapshot = save_snapshot
         self.rank = rank
         self.world_size = world_size
-        self.vocab_size = vocab_size
-        self.n_code    = n_code
-        self.min_frequency = min_frequency
-        self.max_token_length = max_token_length
         print('Loading Data into CPU Memory')
         self._preload()
 
@@ -67,6 +60,9 @@ class ReplayBuffer(IterableDataset):
 
     def _store_episode(self, eps_fn):
         episode = load_episode(eps_fn)
+        state = episode['state']
+        if state.shape[-1] > 8:
+            episode['state'] = np.hstack((state[:, :4], state[:, 18 : 18 + 4]))
         eps_len = episode_len(episode)
         while eps_len + self._size > self._max_size:
             early_eps_fn = self._episode_fns.pop(0)
@@ -95,53 +91,39 @@ class ReplayBuffer(IterableDataset):
     def _sample(self):
         self._samples_since_last_fetch += 1
         episode = self._sample_episode()
-        task_embedding = episode['task_embedding'].astype(np.float32)
         
         # add +1 for the first dummy transition
         idx = np.random.randint(0, episode_len(episode) - self._nstep + 1) + 1
-        action     = episode['action'][idx].astype(np.float32)
-        action_seq = [episode['action'][idx+i].astype(np.float32) for i in range(self._nstep)]
-
-        ############### Prepare future observations ###############
-        next_obs_agent, next_obs_wrist, next_state, next_task_embedding = [], [], [], []
+        action     = episode['action'][idx]
+        action_seq = [episode['action'][idx+i] for i in range(self._nstep)]
+        
+        next_obs, next_state = [], []
         for i in range(self._nstep):
-            next_obs_agent.append(episode['observation'][idx + i][None,:])
-            next_obs_wrist.append(episode['observation_wrist'][idx + i][None,:])
+            next_obs.append(episode['observation'][idx + i][None,:])
             next_state.append(episode['state'][idx + i][None,:])
-            next_task_embedding.append(task_embedding[None,:])
-
-        next_obs_agent = np.vstack(next_obs_agent)
-        next_obs_wrist = np.vstack(next_obs_wrist)
-        next_state = np.vstack(next_state).astype(np.float32)
-        next_task_embedding = np.vstack(next_task_embedding)                           
-        next_obs = (next_obs_agent, next_obs_wrist, next_state, next_task_embedding)
-        
-        ############### Prepare historical observations ###############
-        obs_agent_history, obs_wrist_history, state_history, task_embedding_history = [], [], [], []
-        timestep = idx - 1
-        ### obs_history: (o_{t-3}, o_{t-2}, o_{t-1}, o_{t}, 0, 0 ...)
-        while timestep >= 0 and len(obs_agent_history)<self._nstep_history:
-            obs_agent_history = [episode['observation'][timestep][None,:]] + obs_agent_history
-            obs_wrist_history = [episode['observation_wrist'][timestep][None,:]] + obs_wrist_history
-            state_history     = [episode['state'][timestep][None, :]] + state_history 
-            task_embedding_history = [task_embedding[None, :]] + task_embedding_history
-            timestep -= 1
             
-        ### pad the missing steps when the chosen timestep is smaller than nstep_history
-        pad_step = self._nstep_history - len(obs_agent_history)
-        obs_agent_history = [episode['observation'][0][None,:] for i in range(pad_step)] + obs_agent_history
-        obs_wrist_history = [episode['observation_wrist'][0][None,:] for i in range(pad_step)] + obs_wrist_history
-        state_history     = [episode['state'][0][None, :] for i in range(pad_step)] + state_history 
-        task_embedding_history = [task_embedding[None, :] for i in range(pad_step)] + task_embedding_history
+        next_obs = np.vstack(next_obs)
+        next_state = np.vstack(next_state)         
+        next_obs = (next_obs, next_state)
         
-        obs_agent_history = np.vstack(obs_agent_history) ### (10, feature_dim)
-        obs_wrist_history = np.vstack(obs_wrist_history) ### (10, feature_dim)
-        state_history = np.vstack(state_history).astype(np.float32) ### (10, feature_dim)
-        task_embedding_history = np.vstack(task_embedding_history)  ### (10, feature_dim)         
-        obs_history = (obs_agent_history, obs_wrist_history, state_history, task_embedding_history)
+        obs_history, state_history = [], []
+        timestep = idx - 1
+        ### (o_{t-3}, o_{t-2}, o_{t-1}, o_{t}, 0, 0 ...)
+        while timestep >= 0 and len(obs_history)<self._nstep_history:
+            obs_history = [episode['observation'][timestep][None,:]] + obs_history
+            state_history     = [episode['state'][timestep][None, :]] + state_history 
+            timestep -= 1
+        
+        pad_step = self._nstep_history - len(obs_history)
+        obs_history = [episode['observation'][0][None,:] for i in range(pad_step)] + obs_history
+        state_history     = [episode['state'][0][None, :] for i in range(pad_step)] + state_history 
+        
+        obs_history = np.vstack(obs_history)
+        state_history = np.vstack(state_history)                   
+        obs_history = (obs_history, state_history)
                                  
         if 'token' in episode.keys():
-            tok = episode['token'][idx - 1]
+            tok = episode['token'][idx-1]
             return (obs_history, action, tok, action_seq, next_obs)
         else:
             return (obs_history, action, action_seq, next_obs)
@@ -158,9 +140,7 @@ def _worker_init_fn(worker_id):
 
 
 def make_replay_loader_dist(replay_dir, max_traj_per_task, max_size, batch_size, num_workers,
-                       save_snapshot, nstep, nstep_history, rank, world_size,
-                        n_code=None, vocab_size=None, min_frequency=None,
-                        max_token_length=None):
+                        nstep, nstep_history, rank, world_size):
     max_size_per_worker = max_size // max(1, num_workers)
 
     iterable = ReplayBuffer(replay_dir,
@@ -170,13 +150,8 @@ def make_replay_loader_dist(replay_dir, max_traj_per_task, max_size, batch_size,
                             nstep,
                             nstep_history,
                             fetch_every=1000,
-                            save_snapshot=save_snapshot,
                             rank=rank,
-                            world_size=world_size,
-                            n_code=n_code,
-                            vocab_size=vocab_size,
-                            min_frequency=min_frequency,
-                            max_token_length=max_token_length)
+                            world_size=world_size)
 
     loader = torch.utils.data.DataLoader(iterable,
                                          batch_size=batch_size,
@@ -184,3 +159,4 @@ def make_replay_loader_dist(replay_dir, max_traj_per_task, max_size, batch_size,
                                          pin_memory=False,
                                          worker_init_fn=_worker_init_fn)
     return loader
+

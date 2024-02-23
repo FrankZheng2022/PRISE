@@ -3,21 +3,19 @@ defaults:
   - override hydra/launcher: submitit_local
 
 ############## Directory Info
-libero_path: null
-data_storage_dir: null
-task_data_dir_suffix: _framestack1
+data_storage_dir: /fs/cml-projects/taco_rl/offline_data_mw
+task_data_dir_suffix: _expert1000_repeat1
 results_dir: ./
-downstream_task_name: none
-downstream_task_suite: libero_10 
+downstream_task_name: null
 log_root_dir: exp_local   ### Experimental results will be stored at ${log_root_dir}/${exp_name}
 
 ############## replay buffer
 replay_buffer_size: 100000000
 replay_buffer_num_workers: 1
 nstep: 3 ### number of future observations to load (to train action quantization & finetune action decoder)
-nstep_history: 10 ### number of historical steps for transformer embedding
+nstep_history: 5 ### number of historical steps for transformer embedding
 batch_size: 512
-max_traj_per_task: 50 ### number of demonstration trajectories per task
+max_traj_per_task: 100 ### number of demonstration trajectories per task
 port: 12230
 
 ############## | Stage 1: pretrain action quantization | Stage 2: BPE to learn vocabulary | Stage 3: Downstream Adaptation
@@ -41,6 +39,7 @@ multitask: false ### learning libero-90 policy
 
 
 ############## misc
+frame_stack: 3
 seed: 1
 device: cuda
 save_snapshot: true
@@ -54,9 +53,9 @@ feature_dim: 64
 hidden_dim: 1024
 exp_name: default
 target: prise_agent.PRISEAgent
-action_dim: 7
-img_res: [128, 128]
-decoder_type: gmm
+action_dim: 4
+img_res: [84,84]
+decoder_type: deterministic
 decoder_loss_coef: 0.01
 
 agent:

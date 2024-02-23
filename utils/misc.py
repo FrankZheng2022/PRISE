@@ -1,7 +1,3 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
-#
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
 import random
 import re
 import time
@@ -18,6 +14,8 @@ from torch.distributions.utils import _standard_normal
 import io
 from collections import defaultdict, deque
 
+def mw45_task_names():
+    return ['pick-out-of-hole', 'shelf-place', 'peg-unplug-side', 'drawer-open', 'pick-place', 'button-press-wall', 'assembly', 'door-open', 'button-press-topdown', 'button-press-topdown-wall', 'button-press', 'coffee-button', 'coffee-pull', 'coffee-push', 'dial-turn', 'door-close', 'drawer-close', 'faucet-open', 'faucet-close', 'hammer', 'handle-press-side', 'handle-press', 'handle-pull-side', 'handle-pull', 'lever-pull', 'peg-insert-side', 'reach', 'push-back', 'push', 'plate-slide', 'plate-slide-side', 'plate-slide-back', 'plate-slide-back-side', 'stick-push', 'push-wall', 'reach-wall','sweep-into', 'sweep', 'window-open', 'window-close', 'door-unlock', 'door-lock', 'bin-picking', 'basketball', 'soccer']
 
 def generate_causal_mask(time_step, num_modalities):
     """
@@ -67,6 +65,18 @@ def update_z_history(z_history, z_new, pad_idx, pad_mask):
 
     return updated_z_history, new_pad_idx, new_pad_mask
 
+### code_pred: code sequence predicted by the meta-policy
+### code_target: target code sequence provided by the tokenizer
+### code_dist: pre-computed distance matrix between codes
+def cal_tok_dist(code_pred, code_actual, code_dist):
+    len_match = min(len(code_pred), len(code_actual))
+    dist  = 0.
+    for i in range(len_match):
+        dist += code_dist[code_pred[i]][code_actual[i]]
+    if len(code_pred) < len(code_actual):
+        dist += np.max(code_dist) * (len(code_actual) - len(code_pred))
+    return dist
+
 def tokenize_vocab(traj_tok, vocab_lookup, merges):
     traj_vocab = []
     for i in range(len(traj_tok)):
@@ -83,6 +93,7 @@ def save_episode(episode, fn):
         bs.seek(0)
         with fn.open('wb') as f:
             f.write(bs.read())
+    
 
 def dynamics_loss(f_x1s, f_x2s):
     f_x1 = F.normalize(f_x1s, p=2., dim=-1, eps=1e-3)
@@ -320,52 +331,37 @@ def schedule(schdl, step):
     
 def compute_traj_latent_embedding(episode, device, nstep_history):
     with torch.no_grad():
-        obs_agent = episode['observation'][:-1]
-        obs_wrist = episode['observation_wrist'][:-1]
+        obs = episode['observation'][:-1]
         state     = episode['state'][:-1]
-        task_embedding = episode['task_embedding']
+        if state.shape[-1] == 39:
+            state = np.hstack((state[:, :4], state[:, 18 : 18 + 4]))
         action    = episode['action'][1:]
-        obs_agent, obs_wrist, state, task_embedding, action = to_torch((obs_agent, obs_wrist, state, task_embedding, action), device=device)
+        obs, state, action = to_torch((obs, state, action), device=device)
 
 
-        obs_agent_buffer = deque(maxlen=nstep_history)
-        obs_wrist_buffer = deque(maxlen=nstep_history)
+        obs_buffer = deque(maxlen=nstep_history)
         state_buffer = deque(maxlen=nstep_history)
-        task_embedding_buffer = deque(maxlen=nstep_history)
-        obs_agent_episode, obs_wrist_episode, state_episode, task_embedding_episode = [], [], [], []
+        obs_episode, state_episode = [], []
 
-        for t in range(obs_agent.shape[0]):
+        for t in range(obs.shape[0]):
             ### corner case (prefill the queue in the initial timestep)
-            if len(obs_agent_buffer) == 0:
+            if len(obs_buffer) == 0:
                 for i in range(nstep_history):
-                    obs_agent_buffer.append(obs_agent[0].unsqueeze(0)) ### (1,3,128,128)
-                    obs_wrist_buffer.append(obs_wrist[0].unsqueeze(0)) ### (1,3,128,128)
+                    obs_buffer.append(obs[0].unsqueeze(0)) ### (1,3,128,128)
                     state_buffer.append(state[0].float().unsqueeze(0)) ### (1, state_dim)
-                    task_embedding_buffer.append(task_embedding.float().unsqueeze(0)) ### (1, lang_embed)
             else:
-                obs_agent_buffer.append(obs_agent[t].unsqueeze(0)) ### (1,3,128,128)
-                obs_wrist_buffer.append(obs_wrist[t].unsqueeze(0)) ### (1,3,128,128)
+                obs_buffer.append(obs[t].unsqueeze(0)) ### (1,3,128,128)
                 state_buffer.append(state[t].float().unsqueeze(0)) ### (1,state_dim)
-                task_embedding_buffer.append(task_embedding.float().unsqueeze(0)) ### (1,feature_dim)
 
-            obs_agent_history = torch.concatenate(list(obs_agent_buffer), dim=0) ### (10,3,128,128)
-            obs_wrist_history = torch.concatenate(list(obs_wrist_buffer), dim=0) ### (10,3,128,128)
+            obs_history = torch.concatenate(list(obs_buffer), dim=0) ### (10,3,128,128)
             state_history = torch.concatenate(list(state_buffer), dim=0) ### (10,state_dim)
-            task_embedding_history = torch.concatenate(list(task_embedding_buffer), dim=0) ###(10,feature_dim)(10,lang_emb_dim)
-
-            obs_agent_episode.append(obs_agent_history.unsqueeze(0))
-            obs_wrist_episode.append(obs_wrist_history.unsqueeze(0))
+    
+            obs_episode.append(obs_history.unsqueeze(0))
             state_episode.append(state_history.unsqueeze(0))
-            task_embedding_episode.append(task_embedding_history.unsqueeze(0))
 
 
-        obs_agent_episode = torch.concatenate(obs_agent_episode, dim=0)
-        obs_wrist_episode = torch.concatenate(obs_wrist_episode, dim=0)
+        obs_episode = torch.concatenate(obs_episode, dim=0)
         state_episode = torch.concatenate(state_episode, dim=0)
-        task_embedding_episode = torch.concatenate(task_embedding_episode, dim=0)
-        obs_history = (obs_agent_episode,
-                       obs_wrist_episode,
-                       state_episode,
-                       task_embedding_episode
-                        )
+        obs_history = (obs_episode,
+                       state_episode)
     return obs_history

@@ -4,14 +4,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
-from utils.quantizer import VectorQuantizer
 import time
+from torch.cuda.amp import autocast, GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
-from utils.resnet18_encoder import ResnetEncoder
+from utils.quantizer import VectorQuantizer
 from utils.policy_head import GMMHead
 from utils.data_augmentation import BatchWiseImgColorJitterAug, TranslationAug, DataAugGroup
 import utils.misc as utils
-from tqdm import tqdm
 
 class SinusoidalPositionEncoding(nn.Module):
     def __init__(self, input_size, inv_freq_factor=10, factor_ratio=None):
@@ -62,15 +61,14 @@ class ActionEncoder(nn.Module):
             nn.Tanh(),
             nn.Linear(hidden_dim, feature_dim)
         )
-
         self.apply(utils.weight_init)
     
     def forward(self, z, a):
         u = self.a_embedding(a)
         return self.sa_embedding(z.detach()+u)
 
-class PRISE(nn.Module):
 
+class PRISE(nn.Module):
     def __init__(self, feature_dim, action_dim, hidden_dim, encoder, n_code, device, decoder_type, decoder_loss_coef):
         super(PRISE, self).__init__()
 
@@ -118,6 +116,7 @@ class PRISE(nn.Module):
         
         self.apply(utils.weight_init)
     
+    ### Action Decoding
     def decode(self, z, u, decoder_type):
         if decoder_type == 'deterministic':
             action = self.decoder(z + u)
@@ -128,12 +127,8 @@ class PRISE(nn.Module):
             raise Exception
         return action
     
+    ### State Encoding
     def encode(self, x, ema=False):
-        """
-        Encoder: z_t = e(x_t)
-        :param x: x_t, x y coordinates
-        :return: z_t, value in r2
-        """
         if ema:
             with torch.no_grad():
                 z = self.encoder(x)
@@ -144,6 +139,30 @@ class PRISE(nn.Module):
         return z,  z_out
 
 
+class Encoder(nn.Module):
+    def __init__(self, obs_shape, feature_dim):
+        super().__init__()
+
+        assert len(obs_shape) == 3
+        repr_dim = 32 * 35 * 35
+
+        self.convnet = nn.Sequential(nn.Conv2d(obs_shape[0], 32, 3, stride=2),
+                                 nn.ReLU(), nn.Conv2d(32, 32, 3, stride=1),
+                                 nn.ReLU(), nn.Conv2d(32, 32, 3, stride=1),
+                                 nn.ReLU(), nn.Conv2d(32, 32, 3, stride=1),
+                                 nn.ReLU())
+        self.trunk = nn.Sequential(nn.Linear(repr_dim, feature_dim),
+                                   nn.LayerNorm(feature_dim), nn.Tanh())
+        self.repr_dim = feature_dim
+        
+        self.apply(utils.weight_init)
+
+    def forward(self, obs):
+        obs = obs / 255.0 - 0.5
+        h = self.convnet(obs)
+        h = h.view(h.shape[0], -1)
+        return self.trunk(h)
+    
 class PRISEAgent:
     def __init__(self, obs_shape, action_dim, device, lr, feature_dim,
                  hidden_dim, n_code, alpha, decoder_type, decoder_loss_coef):
@@ -153,25 +172,21 @@ class PRISEAgent:
         self.alpha  = alpha
         self.decoder_type = decoder_type
         self.positional_embedding = SinusoidalPositionEncoding(feature_dim)
-        self.encoders = torch.nn.ModuleList([ResnetEncoder(input_shape=obs_shape, output_size=feature_dim).to(device),
-                                             ResnetEncoder(input_shape=obs_shape, output_size=feature_dim).to(device),
+        self.encoders = torch.nn.ModuleList([
+                                             Encoder(obs_shape, feature_dim),
                                              nn.Sequential(
-                                                nn.Linear(9, feature_dim),
-                                            ),
-                                            nn.Sequential(
-                                                nn.Linear(768, hidden_dim),
-                                                nn.ReLU(),
-                                                nn.Linear(hidden_dim, feature_dim),
+                                                nn.Linear(8, feature_dim),
                                             ),
                                             ])
                                     
         
-        self.PRISE = DDP(PRISE(feature_dim, action_dim, hidden_dim, self.encoders, n_code, device, decoder_type, decoder_loss_coef).to(device))
+        self.PRISE = DDP(PRISE(feature_dim, action_dim, hidden_dim, self.encoders, n_code, 
+                               device, decoder_type, decoder_loss_coef).to(device))
         self.prise_opt = torch.optim.Adam(self.PRISE.parameters(), lr=lr)
+        self.cross_entropy_loss = nn.CrossEntropyLoss()
         
-        color_aug = BatchWiseImgColorJitterAug(input_shape=obs_shape)
-        translation_aug = TranslationAug(input_shape=obs_shape, translation=8)
-        self.aug = DataAugGroup((color_aug, translation_aug))
+        translation_aug = TranslationAug(input_shape=obs_shape, translation=4)
+        self.aug = DataAugGroup((translation_aug,))
         self.mask = None ### will be used later for transformer masks
         
         self.train()
@@ -180,61 +195,42 @@ class PRISEAgent:
         self.training = training
         self.encoders.train(training)
         self.PRISE.train(training)
-
-    ### Shape of the input tensor
-    ### obs: (obs_agent, obs_wrist, state, task_embedding)
+            
     ### obs_agent: (batch_size, 3, 128, 128)
     ### obs_wrist: (batch_size, 3, 128, 128)
     ### state: (batch_size, state_dim)
     ### task_embedding: (batch_size, 768)
-    ### output shape: (batch_size, 1, 4, feature_dim)
+    ### output: (batch_size, 1, 4, feature_dim)
     def encode_obs(self, obs, aug=True):
-        obs_agent, obs_wrist, state, task_embedding = obs
+        img, state = obs
         if aug:
-            obs_agent, obs_wrist = self.aug((obs_agent, obs_wrist))
-        z_agent = self.encoders[0](obs_agent.float(), langs=task_embedding).unsqueeze(1)
-        z_wrist = self.encoders[1](obs_wrist.float(), langs=task_embedding).unsqueeze(1)
-        state   = self.encoders[2](state.float()).unsqueeze(1)
-        task_embedding = self.encoders[3](task_embedding).unsqueeze(1)
-        z = torch.concatenate([z_agent, z_wrist, state, task_embedding], dim=1)
+            img, = self.aug((img,))
+        z = self.encoders[0](img.float()).unsqueeze(1)
+        state   = self.encoders[1](state.float()).unsqueeze(1)
+        z = torch.concatenate([z, state], dim=1)
         return z.unsqueeze(1)
     
-    ### Shape of the input tensor
     ### obs_history: (obs_agent_history, obs_wrist_history, state_history, task_embedding_history)
     ### obs_agent_history: (batch_size, time_step, 3, 128, 128)
-    ### obs_wrist_history: (batch_size, time_step, 3, 128, 128)
     ### state_history: (batch_size, time_step, 9)
-    ### task_embedding_history: (batch_size, time_step, 768)
     def encode_history(self, obs_history, aug=True):
-        obs_agent_history, obs_wrist_history, state_history, task_embedding_history = obs_history
-        batch_size, time_step, num_channel, img_size = obs_agent_history.shape[0], obs_agent_history.shape[1], obs_agent_history.shape[2], obs_agent_history.shape[3]
-        
-        ### shape: (batch_size, timestep, 3, 128, 128)
-        task_embedding_history = task_embedding_history.reshape(-1, task_embedding_history.shape[-1])
+        img_history, state_history = obs_history
+        batch_size, time_step, num_channel, img_size = img_history.shape[0], img_history.shape[1], img_history.shape[2], img_history.shape[3]
         
         if aug:
-            obs_agent_history, obs_wrist_history = self.aug((obs_agent_history, 
-                                                             obs_wrist_history))
+            img_history, = self.aug((img_history,))
         
-        obs_agent_history = obs_agent_history.reshape(-1, num_channel, img_size, img_size)
-        z_agent_history   = self.encoders[0](obs_agent_history.float(), langs=task_embedding_history)
-        
-        obs_wrist_history = obs_wrist_history.reshape(-1, num_channel, img_size, img_size)
-        z_wrist_history   = self.encoders[1](obs_wrist_history.float(), langs=task_embedding_history)
+        img_history = img_history.reshape(-1, num_channel, img_size, img_size)
+        z_img_history   = self.encoders[0](img_history.float())
         
         state_history     = state_history.reshape(-1, state_history.shape[-1])
-        z_state_history   = self.encoders[2](state_history.float())
-        z_task_embedding  = self.encoders[3](task_embedding_history)
+        z_state_history   = self.encoders[1](state_history.float())
         
-        z_agent_history  = z_agent_history.reshape(batch_size,  time_step, 1, -1)
-        z_wrist_history  = z_wrist_history.reshape(batch_size,  time_step, 1, -1)
-        z_state_history  = z_state_history.reshape(batch_size,  time_step, 1, -1)
-        z_task_embedding = z_task_embedding.reshape(batch_size, time_step, 1, -1)
-        
-        z_history = torch.concatenate([z_agent_history, z_wrist_history, z_state_history, z_task_embedding], dim=2)
+        z_img_history  = z_img_history.reshape(batch_size,  time_step, 1, -1)
+        z_state_history  = z_state_history.reshape(batch_size,  time_step, 1, -1)  
+        z_history = torch.concatenate([z_img_history, z_state_history], dim=2)
         return z_history
-    
-    ### Apply the transformer decoder block to get the embedding from the stack of historical latent state embeddings
+
     def compute_transformer_embedding(self, z_history, reset_mask=False):
         batch_size, time_step, num_modalities, feature_dim = z_history.shape
         
@@ -252,29 +248,27 @@ class PRISEAgent:
 
     def update_prise(self, obs_history, action, action_seq, next_obs):
         metrics = dict()
-        index = 0
         
+        ### Convert inputs into tensors
         obs_history = utils.to_torch(obs_history, device=self.device)
         next_obs    = utils.to_torch(next_obs, device=self.device)
         action = torch.torch.as_tensor(action, device=self.device).float()
         action_seq = utils.to_torch(action_seq, device=self.device)
         
         ### (batch_size, num_step_history, 3, 128, 128)
-        obs_agent_history, obs_wrist_history, state_history, task_embedding_history = obs_history
+        img_history, state_history = obs_history
         ### (batch_size, num_step, 3, 128, 128)
-        next_obs_agent, next_obs_wrist, next_state, next_task_embedding = next_obs
-        nstep = next_obs_agent.shape[1]
+        next_img, next_state = next_obs ### image observation, state observation
+        nstep = next_img.shape[1]
         
         ### Data Augmentation (make sure that the augmentation is consistent across timesteps)
-        obs_agent_seq = torch.concatenate([obs_agent_history, next_obs_agent], dim=1)
-        obs_wrist_seq = torch.concatenate([obs_wrist_history, next_obs_wrist], dim=1)
-        obs_agent_seq, obs_wrist_seq = self.aug((obs_agent_seq, obs_wrist_seq))
-        obs_agent_history = obs_agent_seq[:, :obs_agent_history.shape[1]]
-        next_obs_agent    = obs_agent_seq[:, obs_agent_history.shape[1]:]
-        obs_wrist_history = obs_wrist_seq[:, :obs_wrist_history.shape[1]]
-        next_wrist_agent    = obs_wrist_seq[:, obs_wrist_history.shape[1]:]
+        img_seq = torch.concatenate([img_history, next_img], dim=1)
+        img_seq, = self.aug((img_seq, ))
+        img_history = img_seq[:, :img_history.shape[1]]
+        next_img    = img_seq[:, img_history.shape[1]:]
         
-        z_history = self.encode_history((obs_agent_history, obs_wrist_history, state_history, task_embedding_history), aug=False)
+        ### Compute CNN-Transformer Embeddings
+        z_history = self.encode_history((img_history, state_history), aug=False)
         o_embed = self.compute_transformer_embedding(z_history)
         
         z = o_embed
@@ -285,7 +279,7 @@ class PRISEAgent:
             q_loss, u_quantized, _, _, min_encoding_indices = self.PRISE.module.a_quantizer(u)
             quantize_loss += q_loss
             
-            ### Decoder Loss
+            ### Calculate encoder Loss
             decode_action = self.PRISE.module.decoder(o_embed + u_quantized)
             if self.decoder_type == 'deterministic':
                 d_loss = F.l1_loss(decode_action, action_seq[k].float())
@@ -293,13 +287,12 @@ class PRISEAgent:
                 d_loss = self.PRISE.module.decoder.loss_fn(decode_action, action_seq[k].float())
             decoder_loss += d_loss
         
-            ### Dynamics Loss
+            ### Calculate embedding of next timestep
             z = self.PRISE.module.transition(z+u_quantized)
-            ### latent embedding of next timestep
-            next_obs = next_obs_agent[:, k], next_obs_wrist[:, k], next_state[:, k], next_task_embedding[:, k]
+            next_obs = next_img[:, k], next_state[:, k]
             next_z = self.encode_obs(next_obs, aug=False) ### (batch_size, 1, 4, feature_dim)
             
-            ### update latent history with the latest timestep
+            ### Calculate Dynamics loss and update latent history with the latest timestep
             z_history = torch.concatenate([z_history[:, 1:], next_z], dim=1)
             o_embed   = self.compute_transformer_embedding(z_history)
             y_next    = self.PRISE.module.proj_s(o_embed).detach()
@@ -309,7 +302,7 @@ class PRISEAgent:
         self.prise_opt.zero_grad()
         (dynamics_loss + decoder_loss + quantize_loss).backward()
         self.prise_opt.step()
-        metrics['dynamics_loss']      = dynamics_loss.item()
+        metrics['dynamics_loss'] = dynamics_loss.item()
         metrics['quantize_loss'] = quantize_loss.item()
         metrics['decoder_loss']  = decoder_loss.item()
         return metrics
@@ -329,7 +322,6 @@ class PRISEAgent:
         metrics = dict()
         batch = next(replay_iter)
         
-        ### Convert the input into pytorch tensor
         obs_history, action, tok, action_seq, next_obs = batch
         obs_history = utils.to_torch(obs_history, device=self.device)
         next_obs    = utils.to_torch(next_obs, device=self.device)
@@ -339,52 +331,50 @@ class PRISEAgent:
         tok = torch.torch.as_tensor(tok, device=self.device).reshape(-1)
         
         
-        ###################### Update the token_policy ###########################
+        
         with torch.no_grad():
-            obs_agent_history, obs_wrist_history, state_history, task_embedding_history = obs_history
-            next_obs_agent, next_obs_wrist, next_state, next_task_embedding = next_obs
+            ### (batch_size, num_step_history, 3, 128, 128)
+            img_history, state_history = obs_history
+            ### (batch_size, num_step, 3, 128, 128)
+            next_img, next_state = next_obs
             
-            batch_size = next_obs_agent.shape[0]
+            batch_size = next_img.shape[0]
             action_dim = action.shape[-1]
-            nstep = next_obs_agent.shape[1]
-            nstep_history = obs_agent_history.shape[1]
+            nstep = next_img.shape[1]
+            nstep_history = img_history.shape[1]
             
             ### Data Augmentation (make sure that the augmentation is consistent across timesteps)
-            obs_agent_seq = torch.concatenate([obs_agent_history, next_obs_agent], dim=1)
-            obs_wrist_seq = torch.concatenate([obs_wrist_history, next_obs_wrist], dim=1)
-            obs_agent_seq, obs_wrist_seq = self.aug((obs_agent_seq, obs_wrist_seq))
+            img_seq = torch.concatenate([img_history, next_img], dim=1)
+            img_seq, = self.aug((img_seq,))
             state_seq = torch.concatenate([state_history, next_state], dim=1)
-            task_embedding_seq = torch.concatenate([task_embedding_history, next_task_embedding], dim=1)
             
             z_seq = []
             for i in range(nstep):
-                z = self.encode_history([obs_agent_seq[:, i:i+nstep_history],
-                                         obs_wrist_seq[:, i:i+nstep_history],
+                z = self.encode_history([img_seq[:, i:i+nstep_history],
                                          state_seq[:, i:i+nstep_history],
-                                         task_embedding_seq[:, i:i+nstep_history]
                                          ], aug=False)
                 z_seq.append(self.compute_transformer_embedding(z)) ###(batch_size, feature_dim)
         
-        meta_action = self.PRISE.module.token_policy(z_seq[0])
+        meta_action = self.TACO.module.token_policy(z_seq[0])
         token_policy_loss = F.cross_entropy(meta_action, index)
         
         ###################### Finetune Action Decoder ###########################
         if finetune_decoder:
-            ### Iterate over every token and calculate the decoder l1 loss 
             decoder_loss_lst = []
+
             vocab_size = len(idx_to_tok)
             rollout_length = [min(nstep, len(tok_to_code(torch.tensor(idx_to_tok[idx])))) for idx in range(vocab_size)]
             z = torch.concatenate([z.unsqueeze(1) for z in z_seq], dim=1)
-            z = z.unsqueeze(1).repeat(1, vocab_size, 1, 1) ### (batch_size, nstep, vocab_size, feature_dim)
+            z = z.unsqueeze(1).repeat(1, vocab_size, 1, 1) 
             action = torch.concatenate([action.unsqueeze(1) for action in action_seq], dim=1)
-            action = action.unsqueeze(1).repeat(1, vocab_size, 1, 1) ### (batch_size, nstep, vocab_size, feature_dim)
+            action = action.unsqueeze(1).repeat(1, vocab_size, 1, 1) 
 
             with torch.no_grad():
                 u_quantized_lst = []
                 for idx in range(vocab_size):
                     u_quantized_seq = []
                     for t in range(nstep):
-                        learned_code   = self.PRISE.module.a_quantizer.embedding.weight
+                        learned_code   = self.TACO.module.a_quantizer.embedding.weight
                         if t<rollout_length[idx]:
                             u_quantized    = learned_code[tok_to_code(torch.tensor(idx_to_tok[idx]))[t], :]
                         else:
@@ -395,13 +385,13 @@ class PRISEAgent:
                     u_quantized_lst.append(u_quantized.unsqueeze(1))
                 u_quantized_lst = torch.concatenate(u_quantized_lst,dim=1) ### (batch_size, vocab_size, nstep, feature_dim)
 
-            ##### Decode the codes into action sequences and calculate L1 loss ### (batch_size*nstep*feature_dim, -1)
-            decode_action = self.PRISE.module.decoder((z + u_quantized_lst).reshape(-1, z.shape[-1]))
+            ### Decode the codes into action sequences and calculate L1 loss ### (batch_size*nstep*feature_dim, -1)
+            decode_action = self.TACO.module.decoder((z + u_quantized_lst).reshape(-1, z.shape[-1]))
             action = action.reshape(-1, action_dim)
             if self.decoder_type == 'deterministic':
                 decoder_loss = torch.sum(torch.abs(decode_action-action), dim=-1, keepdim=True)
             elif self.decoder_type == 'gmm':
-                decoder_loss = self.PRISE.module.decoder.loss_fn(decode_action, action, reduction='none')
+                decoder_loss = self.TACO.module.decoder.loss_fn(decode_action, action, reduction='none')
             else:
                 print('Decoder type not supported')
                 raise Exception
@@ -409,7 +399,6 @@ class PRISEAgent:
 
             rollout_length = torch.torch.as_tensor(rollout_length).to(self.device)
             expanded_index = rollout_length.unsqueeze(0).unsqueeze(-1).expand(batch_size, vocab_size, nstep)
-            ### mask the timesteps when length of the token is less than nstep
             timestep_tensor = torch.arange(nstep).view(1, 1, -1).expand_as(decoder_loss).to(self.device)
             mask = timestep_tensor < expanded_index
             decoder_loss = torch.sum(decoder_loss*mask.float(), dim=-1) ### (batch_size, vocab_size)
@@ -419,9 +408,9 @@ class PRISEAgent:
         else:
             decoder_loss = torch.tensor(0.)
         
-        self.prise_opt.zero_grad()
+        self.taco_opt.zero_grad()
         (token_policy_loss+self.alpha*decoder_loss).backward()
-        self.prise_opt.step()
+        self.taco_opt.step()
         
         metrics = dict()
         metrics['token_policy_loss'] = token_policy_loss.item()

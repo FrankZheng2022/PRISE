@@ -17,8 +17,8 @@ This thread contains implementation of **PRISE** on **LIBERO**. Check out the **
 
 **Step 1: Setup Environment**: 
 ```
-conda create -n libero python=3.8.13
-conda activate libero
+conda create -n prise python=3.8.13
+conda activate prise
 pip install -r requirements.txt
 pip install -e .
 ```

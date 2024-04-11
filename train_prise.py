@@ -325,6 +325,7 @@ class Workspace:
                 action  = torch.torch.as_tensor(action, device=self.device)
                 obs_history = utils.compute_traj_latent_embedding(episode, device=self.device, nstep_history=self.cfg.nstep_history)
                 z = self.agent.encode_history(obs_history, aug=False)
+                z = self.agent.compute_transformer_embedding(z)
                 u = self.agent.PRISE.module.action_encoder(z, action.float())
                 _, _, _, _, codes = self.agent.PRISE.module.a_quantizer(u)
                 codes = list(codes.reshape(-1).detach().cpu().numpy())

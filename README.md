@@ -69,7 +69,7 @@ By default, we set voabulary size to be 200. The learned BPE tokenizer will be s
 ***Case I: Multitask Learning***:
 To train a multitask generalist policy on LIBERO-90:
 ```
-python train_prise.py exp_name=${EXP_NAME} replay_buffer_num_workers=4 stage=3 exp_bc_name=${DOWNSTREAM_EXP_NAME} multitask=true downstream_task_suite=libero_90 num_train_steps=30010 eval=false save_snapshot=true vocab_size=${VOCAB_SIZE} &
+python train_prise.py exp_name=${EXP_NAME} replay_buffer_num_workers=4 stage=3 downstream_exp_name=${DOWNSTREAM_EXP_NAME} multitask=true downstream_task_suite=libero_90 num_train_steps=30010 eval=false save_snapshot=true vocab_size=${VOCAB_SIZE} &
 ```
 To evaluate the trained multitask policy:
 ```

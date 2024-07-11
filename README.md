@@ -1,4 +1,4 @@
-# PRISE: Learning Temporal Action Abstractions as a Sequence Compression Problem
+# {PRISE}: {LLM}-Style Sequence Compression for Learning Temporal Action Abstractions in Control
 <p align="center" style="font-size: 50px">
    <a href="https://arxiv.org/pdf/2402.10450.pdf">[Paper]</a>&emsp;<a href="">[Project Website]</a>
 </p>
@@ -89,13 +89,15 @@ python train_prise.py exp_name=${EXP_NAME} replay_buffer_num_workers=4 batch_siz
 If you find our method or code relevant to your research, please consider citing the paper as follows:
 
 ```
-@misc{zheng2024prise,
-      title={PRISE: Learning Temporal Action Abstractions as a Sequence Compression Problem}, 
-      author={Ruijie Zheng and Ching-An Cheng and Hal Daumé III au2 and Furong Huang and Andrey Kolobov},
+@inproceedings{zheng2024prise,
+      abbr={ICML 2024},
+      title={{PRISE}: {LLM}-Style Sequence Compression for Learning Temporal Action Abstractions in Control}, 
+      author={Ruijie Zheng and Ching-An Cheng and Hal Daumé III and Furong Huang and Andrey Kolobov},
       year={2024},
-      eprint={2402.10450},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG}
+      booktitle={International Conference on Machine Learning (<b>Oral (1.5%)</b>). The short version is presented as spotlight talk at CoRL 2023 Pre-Training for Robot Learning Workshop},
+      primaryClass={cs.LG},
+      selected={true},
+      html={https://ruijiezheng.com/project/PRISE/index.html},
 }
 ```
 

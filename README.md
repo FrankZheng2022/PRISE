@@ -89,15 +89,13 @@ python train_prise.py exp_name=${EXP_NAME} replay_buffer_num_workers=4 batch_siz
 If you find our method or code relevant to your research, please consider citing the paper as follows:
 
 ```
-@inproceedings{zheng2024prise,
-      abbr={ICML 2024},
-      title={{PRISE}: {LLM}-Style Sequence Compression for Learning Temporal Action Abstractions in Control}, 
-      author={Ruijie Zheng and Ching-An Cheng and Hal Daumé III and Furong Huang and Andrey Kolobov},
-      year={2024},
-      booktitle={International Conference on Machine Learning (<b>Oral (1.5%)</b>). The short version is presented as spotlight talk at CoRL 2023 Pre-Training for Robot Learning Workshop},
-      primaryClass={cs.LG},
-      selected={true},
-      html={https://ruijiezheng.com/project/PRISE/index.html},
+@inproceedings{
+zheng2024prise,
+title={PRISE: LLM-Style Sequence Compression for Learning Temporal Action Abstractions in Control},
+author={Ruijie Zheng and Ching-An Cheng and Hal Daum{\'e} III and Furong Huang and Andrey Kolobov},
+booktitle={Forty-first International Conference on Machine Learning},
+year={2024},
+url={https://openreview.net/forum?id=p225Od0aYt}
 }
 ```
 

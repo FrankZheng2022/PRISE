@@ -1,4 +1,4 @@
-# {PRISE}: {LLM}-Style Sequence Compression for Learning Temporal Action Abstractions in Control
+# PRISE: LLM-Style Sequence Compression for Learning Temporal Action Abstractions in Control
 <p align="center" style="font-size: 50px">
    <a href="https://arxiv.org/pdf/2402.10450.pdf">[Paper]</a>&emsp;<a href="">[Project Website]</a>
 </p>
